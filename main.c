@@ -50,24 +50,54 @@ char *parse_string(const char **ptr) {
   while (**ptr != '\"' && **ptr != '\0')
     (*ptr)++;
 
-  (*ptr)++;
+  if (**ptr == '\"')
+    (*ptr)++;
 
   const char *start = *ptr;
 
-  while (**ptr != '\"' && **ptr != '\0')
-    (*ptr)++;
+  while (**ptr != '\0') {
+
+    if (**ptr == '\\' && *(*ptr + 1) != '\0') {
+      *ptr += 2;
+    } else if (**ptr == '\"') {
+
+      break;
+    } else {
+      (*ptr)++;
+    }
+  }
 
   int length = *ptr - start;
 
   char *my_name = malloc(length + 1);
 
-  for (int i = 0; i < length; i++) {
-    my_name[i] = start[i];
+  int src = 0;
+  int dst = 0;
+
+  while (src < length) {
+    if (start[src] == '\\') {
+      src++;
+
+      if (start[src] == 'n')
+        my_name[dst++] = '\n';
+      else if (start[src] == 't')
+        my_name[dst++] = '\t';
+      else if (start[src] == '\"')
+        my_name[dst++] = '\"';
+      else if (start[src] == '\\')
+        my_name[dst++] = '\\';
+      else
+        my_name[dst++] = start[src];
+    } else {
+      my_name[dst++] = start[src];
+    }
+    src++;
   }
 
-  my_name[length] = '\0';
+  my_name[dst] = '\0';
 
-  (*ptr)++;
+  if (**ptr == '\"')
+    (*ptr)++;
 
   return my_name;
 }
@@ -100,64 +130,6 @@ JsonValue *create_json_value(JsonType type) {
 
 JsonValue *parse_value(const char **ptr) {
   skip_whitespaces(ptr);
-
-  /*
-  if (**ptr == '\"') {
-    char *s = parse_string(ptr);
-    printf("String: %s\n", s);
-    free(s);
-  } else if (isdigit(**ptr)) {
-    long n = parse_integer(ptr);
-    printf("Number: %ld\n", n);
-  } else if (strncmp(*ptr, "true", 4) == 0) {
-    printf("Boolean: true\n");
-    *ptr += 4;
-  } else if (strncmp(*ptr, "false", 5) == 0) {
-    printf("Boolean: false\n");
-    *ptr += 5;
-  } else if (strncmp(*ptr, "null", 4) == 0) {
-    printf("Literal: null\n");
-    *ptr += 4;
-  } else if (**ptr == '[') {
-    (*ptr)++;
-
-    while (**ptr != ']' && **ptr != '\0') {
-      skip_whitespaces(ptr);
-
-      if (**ptr == ',') {
-        (*ptr)++;
-        skip_whitespaces(ptr);
-      }
-
-      if (**ptr == ']')
-        break;
-
-      parse_value(ptr);
-      skip_whitespaces(ptr);
-    }
-    if (**ptr == ']')
-      (*ptr)++;
-  } else if (**ptr == '{') {
-    (*ptr)++;
-
-    while (**ptr != '}' && **ptr != '\0') {
-      skip_whitespaces(ptr);
-
-      if (**ptr == ',' || **ptr == ':') {
-        (*ptr)++;
-        skip_whitespaces(ptr);
-      }
-
-      if (**ptr == '}')
-        break;
-
-      parse_value(ptr);
-    }
-
-    if (**ptr == '}')
-      (*ptr)++;
-  }
-*/
 
   JsonValue *v = NULL;
 
@@ -255,6 +227,9 @@ JsonValue *parse_value(const char **ptr) {
       (*ptr)++;
   }
 
+  if (v == NULL && **ptr != '\0') {
+    fprintf(stderr, "Unexpected character '%c' at: %.10s...\n", **ptr, *ptr);
+  }
   return v;
 }
 
@@ -272,7 +247,7 @@ void print_json(JsonValue *v, int indent) {
     break;
 
   case JSON_NUMBER:
-    printf("NUMBER: %ld", v->data.number);
+    printf("NUMBER: %ld\n", v->data.number);
     break;
 
   case JSON_BOOL:
@@ -304,41 +279,83 @@ void print_json(JsonValue *v, int indent) {
 
       printf("KEY: \"%s\" -> ", v->data.object.pairs[i].key);
 
-      print_json(v->data.object.pairs[i].value, 0);
+      print_json(v->data.object.pairs[i].value, indent + 1);
     }
     for (int i = 0; i < indent; i++)
-      printf("}\n");
+      printf(" ");
+
+    printf("}\n");
     break;
   }
 }
 
+void free_json(JsonValue *v) {
+  if (!v)
+    return;
+
+  switch (v->type) {
+  case JSON_STRING:
+    free(v->data.string);
+    break;
+
+  case JSON_ARRAY:
+    for (int i = 0; i < v->data.array.count; i++) {
+      free_json(v->data.array.items[i]);
+    }
+    free(v->data.array.items);
+    break;
+
+  case JSON_OBJECT:
+    for (int i = 0; i < v->data.object.count; i++) {
+      free(v->data.object.pairs[i].key);
+      free_json(v->data.object.pairs[i].value);
+    }
+    free(v->data.object.pairs);
+    break;
+
+  default:
+    break;
+  }
+  free(v);
+}
+
 int main() {
 
-  const char *json = "{ \"user\" : { \"id\" : 101, \"tags\" : [\"admin\", "
-                     "\"dev\"] }, \"married\": false, \"data\" : null }";
+  const char *json =
+      "{"
+      "  \"project\": \"C-SON Parser\","
+      "  \"version\": 1,"
+      "  \"active\": true,"
+      "  \"metadata\": {"
+      "    \"author\": \"Aniket\","
+      "    \"tags\": [\"C\", \"JSON\", \"Parsing\"],"
+      "    \"stats\": {"
+      "      \"lines\": 200,"
+      "      \"complexity\": \"medium\""
+      "    }"
+      "  },"
+      "  \"data_points\": ["
+      "    {\"id\": 1, \"value\": \"start\"},"
+      "    {\"id\": 2, \"value\": \"middle\", \"extra\": [10, 20]},"
+      "    {\"id\": 3, \"value\": \"end\", \"nested_null\": null}"
+      "  ],"
+      "  \"settings\": {"
+      "    \"flags\": [true, false, true],"
+      "    \"config\": {} "
+      "  }"
+      "}";
   const char *cursor = json;
 
   skip_whitespaces(&cursor);
 
-  // while (*cursor != '\0' && *cursor != '}') {
-  //   skip_whitespaces(&cursor);
-  //
-  //   if (*cursor == '{' || *cursor == ':' || *cursor == ',') {
-  //     cursor++;
-  //     skip_whitespaces(&cursor);
-  //   }
-  //
-  //   if (*cursor == '}' || *cursor == '\0')
-  //     break;
-  //
-  //   parse_value(&cursor);
-  // }
-
   JsonValue *root = parse_value(&cursor);
 
   if (root) {
-    printf("---Parsed JSON Tree---");
+    printf("---Parsed JSON Tree---\n");
     print_json(root, 0);
+
+    free_json(root);
+    printf("\nMemory freed successfully!\n");
   }
 
   return 0;
